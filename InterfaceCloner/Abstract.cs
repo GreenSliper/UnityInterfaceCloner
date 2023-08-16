@@ -39,18 +39,19 @@ namespace InterfaceCloner
 		public bool ICloneableRef => _icloneableRef;
 		public bool IsChildComponentRef => _childComponentRef;
 		public bool PassReferenceOnly => _passReferenceOnly;
+		public bool FixInnerType => _fixInnerType;
 
-		bool _icloneableRef, _childComponentRef, _passReferenceOnly;
-		/// <summary>
-		/// 
-		/// </summary>
+		bool _icloneableRef, _childComponentRef, _passReferenceOnly, _fixInnerType;
+
 		/// <param name="icloneableRef">Use on interface fields which hidden types also implement ICloneable interface. 
         /// Otherwise the reference is copied</param>
-		public FixRefAttribute(bool icloneableRef = false, bool childComponentRef = false, bool passReferenceOnly = false)
+		/// <param name="fixInnerType">[Recursive] Field type contains fields with FixRefAttribute. Should implement ICloneable</param>
+		public FixRefAttribute(bool icloneableRef = false, bool childComponentRef = false, bool passReferenceOnly = false, bool fixInnerType = false)
 		{
             _icloneableRef = icloneableRef;
 			_childComponentRef = childComponentRef;
 			_passReferenceOnly = passReferenceOnly;
+			_fixInnerType = fixInnerType;
 		}
 	}
 }

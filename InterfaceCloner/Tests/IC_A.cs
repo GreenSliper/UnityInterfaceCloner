@@ -6,14 +6,25 @@ using UnityEngine;
 
 namespace InterfaceCloner.Tests
 {
-    [FixCloned]
+    [Serializable]
+    public class IC_InnerClass : ICloneable
+    {
+		[FixRef(childComponentRef: true)]
+		public IIC_B innerComponent;
+
+        public object Clone() => MemberwiseClone();
+	}
+
+	[FixCloned]
     public class IC_A : MonoBehaviour
     {
-        [FixRef]
+        [FixRef(icloneableRef:true)]
         ICloneable cl = new IC_Cloneable();
         [FixRef(childComponentRef: true)]
         IIC_B childComponentInterface;
-        [FixRef(childComponentRef: true)]
+        [FixRef(fixInnerType: true)]
+        IC_InnerClass innerClassRef;
+		[FixRef(childComponentRef: true)]
         IIC_B[] childComponentArray;
 		[FixRef(childComponentRef: true)]
 		List<IIC_B> childComponentList;
@@ -42,6 +53,7 @@ namespace InterfaceCloner.Tests
         void Init()
         {
             childComponentInterface = GetComponentInChildren<IIC_B>();
+            innerClassRef = new IC_InnerClass() { innerComponent = childComponentInterface };
 			childComponentArray = new IIC_B[iic_bArray.Length];
             for(int i = 0; i < iic_bArray.Length; i++)
                 childComponentArray[i] = iic_bArray[i].GetComponent<IIC_B>();
@@ -68,7 +80,12 @@ namespace InterfaceCloner.Tests
                 return;
             }
 
-            if (childComponentArray != null)
+            if (innerClassRef != null && innerClassRef.innerComponent != null)
+                innerClassRef.innerComponent.PrintField();
+            else
+                Debug.LogError("Inner class reference lost");
+
+			if (childComponentArray != null)
                 Debug.Log($"Array: {string.Join(", ", childComponentArray.Select(x => x.Field))}");
             else
             {

@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
+using static UnityEngine.GraphicsBuffer;
+using UnityEngine.Networking.Types;
 
 namespace InterfaceCloner
 {
@@ -45,18 +47,7 @@ namespace InterfaceCloner
 					if(attr == null)
 						continue;
 					//correctly get a copy of field
-					object restoredValue = null;
-					if (field.FieldType.IsArray && field.FieldType.GetElementType().IsInterface)
-						restoredValue = CloneArray(source.transform, target.transform, mono, field, attr);
-					else if (field.FieldType.IsGenericType)
-						restoredValue = CloneGeneric(source.transform, target.transform, mono, field, attr);
-					else if (!field.FieldType.IsInterface)
-					{
-						Debug.LogWarning("Used FixRefAttribute on non-interface field. Ignored.");
-						continue;
-					}
-					else
-						restoredValue = CloneField(source.transform, target.transform, mono, field, attr);
+					object restoredValue = CloneField(source, target, mono, field, attr);
 					//set relative field value
 					if (restoredValue != null)
 						field.SetValue(clonedMono, restoredValue);
@@ -64,19 +55,36 @@ namespace InterfaceCloner
 			}
 		}
 
+		object CloneField(Transform srcRoot, Transform targetRoot, MonoBehaviour mono, FieldInfo field, FixRefAttribute attr, object srcValue = null)
+		{
+			if (field.FieldType.IsArray /*&& field.FieldType.GetElementType().IsInterface*/)
+				return CloneArray(srcRoot, targetRoot, mono, field, attr);
+			else if (field.FieldType.IsGenericType)
+				return CloneGeneric(srcRoot, targetRoot, mono, field, attr);
+			/*else if (!field.FieldType.IsInterface)
+			{
+				Debug.LogWarning("Used FixRefAttribute on non-interface field. Ignored.");
+				return null;
+			}
+			else*/
+			return CloneDefaultField(srcRoot, targetRoot, mono, field, attr, srcValue);
+		}
+
+
+		#region clone_containers
 		/// <summary>
 		/// Restore references to array elements
 		/// </summary>
-		object CloneArray(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute)
+		object CloneArray(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute, object srcValue = null)
 		{
-			if (TryCloneRefGetValue(monoSrc, srcField, refAttribute, out var srcVal))
-				return srcVal;
+			if (srcValue == null && TryCloneRefGetValue(monoSrc, srcField, refAttribute, out srcValue))
+				return srcValue;
 			var rank = srcField.FieldType.GetArrayRank();
 			if (rank != 1)
 			{
 				Debug.LogWarning("Multidimensional arrays not supported");
 			}
-			var srcArr = srcVal as Array;
+			var srcArr = srcValue as Array;
 			var result = Array.CreateInstance(srcField.FieldType.GetElementType(), srcArr.Length);
 
 			int cnter = 0;
@@ -88,36 +96,28 @@ namespace InterfaceCloner
 		/// <summary>
 		/// Restore references to generic interface underlying element
 		/// </summary>
-		object CloneGeneric(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute)
+		object CloneGeneric(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute, object srcValue = null)
 		{
-			if (TryCloneRefGetValue(monoSrc, srcField, refAttribute, out var srcVal))
-				return srcVal;
-			var srcType = srcVal.GetType();
+			if (srcValue == null && TryCloneRefGetValue(monoSrc, srcField, refAttribute, out srcValue))
+				return srcValue;
+			var srcType = srcValue.GetType();
 			var genericDef = srcType.GetGenericTypeDefinition();
 			if (genericCloners.TryGetValue(genericDef, out var cloner))
 			{
-				var values = cloner.GetOriginalValues(srcVal)
+				var values = cloner.GetOriginalValues(srcValue)
 					//clone values properly
 					.Select(x => CloneFieldValue(srcRoot, cloneRoot, x, refAttribute));
 				return cloner.CreateInstance(srcType.GetGenericArguments(), values);
 			}
-			//list
-			/*if (srcType.GetGenericTypeDefinition() == typeof(List<>))
-			{
-				var listType = typeof(List<>).MakeGenericType(srcType.GetGenericArguments());
-				IList result = Activator.CreateInstance(listType) as IList;
-				foreach (var item in srcVal as IList)
-					result.Add(CloneFieldValue(srcRoot, cloneRoot, item, refAttribute));
-				return result;
-			}*/
-			//add other generic types here
 			Debug.LogWarning("Type not supported!");
 			return null;
 		}
+		
+		#endregion
 
-		object CloneField(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute)
+		object CloneDefaultField(Transform srcRoot, Transform cloneRoot, MonoBehaviour monoSrc, FieldInfo srcField, FixRefAttribute refAttribute, object srcVal = null)
 		{
-			if (TryCloneRefGetValue(monoSrc, srcField, refAttribute, out var srcVal))
+			if (srcVal == null && TryCloneRefGetValue(monoSrc, srcField, refAttribute, out srcVal))
 				return srcVal;
 			return CloneFieldValue(srcRoot, cloneRoot, srcVal, refAttribute);
 		}
@@ -132,6 +132,25 @@ namespace InterfaceCloner
 					Debug.LogError("Field marked as ICloneable reference does not contain ICloneable underlying type");
 					return null;
 				}
+
+			if (refAttribute.FixInnerType)
+			{
+				object cloned = null;
+				if (srcVal is ICloneable icl)
+					cloned = icl.Clone();
+				else
+				{
+					Debug.LogError($"Error attempting to clone type {srcVal.GetType().Name} in a recursive pass. Should be ICloneable");
+				}
+				foreach (var field in srcVal.GetType().GetFields(flags))
+				{
+					var attr = field.GetCustomAttribute<FixRefAttribute>();
+					if (attr == null)
+						continue;
+					field.SetValue(cloned, CloneField(srcRoot, cloneRoot, null, field, attr, field.GetValue(srcVal)));
+				}
+				return cloned;
+			}
 			//restore references to components
 			if (refAttribute.IsChildComponentRef)
 			{
